@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"image/png"
 	"log"
-	"math"
 	"net/http"
 	"os"
 	"strconv"
@@ -27,30 +26,29 @@ func logError(err error) {
 	}
 }
 
-func Index(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
+func Index(w http.ResponseWriter, _ *http.Request, _ httprouter.Params) {
 	w.Header().Set("content-type", "text/plain")
 	w.WriteHeader(200)
-	fmt.Fprintf(w, "unnamed library to generate barcodes & qrcodes using http requests\n\n"+
-		"GET /generate/<mode>/<value>[?scale=<scale>]\n\n"+
+	fmt.Fprintf(w, "Barcode Server\n"+
+		"A library to generate barcodes & qrcodes using http requests\n\n"+
+		"GET /generate/<mode>/<size>?data=<data>\n\n"+
 		"mode  - barcode mode (one of: ean, code39, code93, code128, aztec, qr)\n"+
-		"value - data to encode\n"+
+		"data  - data to encode\n"+
 		"scale - output image scale")
 }
 
-func Health(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
+func Health(w http.ResponseWriter, _ *http.Request, _ httprouter.Params) {
 	fmt.Fprintf(w, "OK")
 }
 
 func Generate(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
 	query := req.URL.Query()
-	value := ps.ByName("value")
+	value := query.Get("data")
+	size := ps.ByName("size")
 	mode := ps.ByName("name")
 
 	var code barcode.Barcode
 	var err error
-
-	width := 150
-	height := 100
 
 	switch mode {
 	case "ean":
@@ -66,41 +64,34 @@ func Generate(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
 		code, err = code128.Encode(value)
 		break
 	case "aztec":
-		width = 200
-		height = 200
 		code, err = aztec.Encode([]byte(value), aztec.DEFAULT_EC_PERCENT, aztec.DEFAULT_LAYERS)
 		break
 	case "qr":
-		width = 200
-		height = 200
 		code, err = qr.Encode(value, qr.M, qr.Auto)
 		break
 
 	default:
 		w.WriteHeader(404)
+		fmt.Fprintf(w, "404 page not found")
 		return
 	}
 
-	scaleStr := query.Get("scale")
-	scale := 1.0
-
-	if len(scaleStr) > 0 {
-		if strings.HasPrefix(scaleStr, "x") {
-			scaleStr = scaleStr[1:]
-		}
-
-		scale, err = strconv.ParseFloat(scaleStr, 64)
+	sizeParts := strings.Split(size, "x")
+	if len(sizeParts) != 2 {
+		w.WriteHeader(400)
+		fmt.Fprintf(w, "invalid size")
+		return
 	}
 
-	width = int(math.Round(scale * float64(width)))
-	height = int(math.Round(scale * float64(height)))
-
+	width, err := strconv.Atoi(sizeParts[0])
+	height, err := strconv.Atoi(sizeParts[1])
 	if err == nil {
 		code, err = barcode.Scale(code, width, height)
 	}
 
 	if err != nil {
 		w.WriteHeader(500)
+		fmt.Fprintf(w, "%s", err)
 		return
 	}
 
@@ -110,13 +101,11 @@ func Generate(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
 	logError(png.Encode(w, code))
 }
 
-
-
 func main() {
 	router := httprouter.New()
 	router.GET("/", Index)
 	router.GET("/health", Health)
-	router.GET("/generate/:name/:value", Generate)
+	router.GET("/generate/:name/:size", Generate)
 
 	port := os.Getenv("PORT")
 
